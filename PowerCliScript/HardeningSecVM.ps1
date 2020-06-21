@@ -1,11 +1,11 @@
-#Requires -Version 4.0
+#Requires -Version 5.0
 #Requires -RunAsAdministrator   
 
 <#
 .Synopsis
    Hardening VM
 .DESCRIPTION
-   Hardening and Sec VM Vcenter 6.5
+   Hardening and Sec Ambev VM Vcenter 6.5
 .EXAMPLE
    Insert after create main function
 .URL
@@ -18,7 +18,7 @@
 .CREATEDBY
     Juliano Alves de Brito Ribeiro (julianoalvesbr@live.com ou jaribeiro@uoldiveo.com)
 .VERSION INFO
-    0.5.1
+    0.5.2
 .TO THINK
     Seria possível que a vida evoluísse aleatoriamente a partir de matéria inorgânica? Não de acordo com os matemáticos.
 
@@ -32,25 +32,45 @@
 
     1. Mark Eastman, MD, Creation by Design, T.W.F.T. Publishers, 1996, 21-22.
 
+.IMPROVEMENTS
+    0.5.2
+    Blocks to choose enabled and disable:
+        Copy Paste;
+        VMDK BACKUP;
+        Completely Disable Time Sync with ESXi
     
 #>
 
 Clear-Host
 
-Import-Module -Name Vmware.VimAutomation.Core -WarningAction SilentlyContinue -ErrorAction Stop
+#VALIDATE MODULE
+    $moduleExists = Get-Module -Name Vmware.VimAutomation.Core
+
+    if ($moduleExists){
+    
+        Write-Output "The Module Vmware.VimAutomation.Core is already loaded"
+    
+    }#if validate module
+    else{
+    
+        Import-Module -Name Vmware.VimAutomation.Core -WarningAction SilentlyContinue -ErrorAction Stop
+    
+    }#else validate module
 
 
-function Pause-PSScript
+function Script:Pause-PSScript
 {
 
-   Read-Host 'Press [ENTER] to Continue' | Out-Null
+   Read-Host 'Pressione [ENTER] para continuar' | Out-Null
 
 }
 
-
 Write-Host "ATTENTION: RUN THE SCRIPT REMOTELY. IT IS NOT NECESSARY TO COPY TO THE VM (s)" -ForegroundColor White -BackgroundColor Red
+
 Write-Output "`n"
+
 Write-Host "ATTENTION: RUN THE SCRIPT WITH THE VM(s) POWERED ON. AFTER RUNNING, JUST RESTART THEM TO APPLY THE SETTINGS" -ForegroundColor White -BackgroundColor Red
+
 Pause-PSScript 
 
 
@@ -86,20 +106,26 @@ if (!($reportPathExists)){
 .EXAMPLE
    Another example of how to use this cmdlet
 #>
-
 function Set-VMHardeningSec
 {
     [CmdletBinding()]
     Param
     (
         # Param1 help description
-         [Parameter(Mandatory = $true, Position = 0)]
-    [System.Object[]]
-    $vmList
-
+        [Parameter(Mandatory = $true, Position = 0)]
+        [System.Object[]]
+        $vmList,
+        [Parameter(Mandatory = $true, Position = 1)]
+        [System.Boolean]
+        $disableCopyPaste=$true,
+        [Parameter(Mandatory = $true, Position = 2)]
+        [System.Boolean]
+        $ConfigBackupParam=$false,
+        [Parameter(Mandatory = $false, Position = 3)]
+        [System.Boolean]
+        $DisableTimeSyncFull=$false
     
     )
-
 
 forEach ($vmGuest in $vmList){
 
@@ -305,7 +331,7 @@ forEach ($vmGuest in $vmList){
 
    
 #####DISABLE OR ENABLE COPY PASTE
-if ($disableCopyPaste -eq $true){
+if ($disableCopyPaste){
 
 
 #Explicitly disable copy/paste operations
@@ -376,7 +402,7 @@ if ($disableCopyPaste -eq $true){
 
 
 
-}#BLOCK DISABLE COPY PASTE
+}#DISABLE COPY PASTE
 else{
 
 #Explicitly Enable copy/paste operations
@@ -450,7 +476,7 @@ else{
 
     }#END of Main Else
 
-}#BLOCK ENABLE COPY PASTE
+}#ENABLE COPY PASTE
 
 
 ######Set Max Session Number of Console to 2  
@@ -551,16 +577,11 @@ else{
 
 
 ###########################################
-#RUN SPECIFIC CONFIG BACKUP PROJECT
-do {
+#RUN CONFIG BACKUP PROJECT
+###########################################
 
-    Write-Output "Would you like to Run Project Specific Config to Backup VMs (Default is No)" 
-        $ChoiceMP = Read-Host " ( y / n ) "
-            Switch ($ChoiceMP)
-              {
-                Y {
-                    
-                  
+if ($ConfigBackupParam){
+
 ###### https://kb.vmware.com/s/article/1031873
 ###### Enable CBT snapshots backup
     $paramName = ""
@@ -774,24 +795,300 @@ do {
         Get-VM -Name $vmGuest | New-AdvancedSetting -Name $paramName -value "True" -Confirm:$False -Verbose
 
 }#END of Main Else                   
-                       
-       
-                    }#end of Y - MP
-                N {
-                   
-                   Write-Output "Do Nothing. Next Step" 
-       
-                    }#end of NO - MP
-                Default { 
-                    
-                    Write-Output "Do Nothing. Next Step"          
-       
-                 }#end of Default
-}#end of Switch
 
 
-}while ($ChoiceMP -notmatch ('^(?:Y\b|N\b)'))
+}#END OF IF BACKUP PARAM
+else{
 
+    Write-Host "You choose not configure backup param in VM: $vmGuest" -ForegroundColor White -BackgroundColor DarkGreen
+
+}#END OF ELSE BACKUP PARAM
+
+
+##############################################
+#RUN CONFIG TO COMPLETELY TIME SYNC WITH ESXI
+##############################################
+
+if ($DisableTimeSyncFull){
+
+    Write-Host "PLEASE ATTENTION. BEFORE INPUT NEXT CONFIG, I HAVE TO SHUTDOWN THE VM: $vmGuest" -ForegroundColor White -BackgroundColor DarkRed
+
+    Write-Host "OPERATION WILL FAIL IF VMTOOLS IS NOT INSTALLED ON VM: $vmGuest" -ForegroundColor White -BackgroundColor DarkRed
+    
+    Pause-PSScript
+    
+    $tmpVM = Vmware.VimAutomation.Core\Get-VM -Name $vmGuest -ErrorAction Continue
+
+    Shutdown-VMGuest -VM $tmpVM -Confirm:$True -Verbose -ErrorAction Continue
+
+    Start-Sleep -Seconds 150
+
+#####Disable Time Sync - https://kb.vmware.com/s/article/1189
+#####https://dirteam.com/sander/2019/07/18/managing-active-directory-time-synchronization-on-vmware-vsphere/
+    $paramName = ""
+    $paramName = "tools.syncTime"
+
+    $toolsSyncTimeParam = Get-AdvancedSetting -Entity $vmGuest | Where-Object -FilterScript {$PSItem.Name -eq $paramName}
+    
+    if ($toolsSyncTimeParam){
+        
+        Write-Output "O parâmetro - $paramName - existe. Verificando valor"
+        
+        $toolsSyncTimeValue = Get-AdvancedSetting -Entity $vmGuest | Where-Object -FilterScript {$PSItem.Name -eq $paramName} | Select-Object -ExpandProperty Value
+        
+        if ($toolsSyncTimeValue -eq '0'){
+            
+            Write-Output "The Value of $paramName is: $toolsSyncTimeValue . Value OK"
+            
+            }#END of Internal IF
+            else{
+            
+            Get-AdvancedSetting -Entity $vmGuest -Name $paramName | Set-AdvancedSetting -Value 0 -Confirm:$False -Verbose
+            
+            }#END of Internal ELSE
+
+
+        }#end of Main IF
+    else{
+        
+        Get-VM -Name $vmGuest | New-AdvancedSetting -Name $paramName -value 0 -Confirm:$false -Verbose
+
+}#END of Main Else 
+
+
+    $paramName = ""
+    $paramName = "time.synchronize.continue"
+
+    $timeSynchronizeContinueParam = Get-AdvancedSetting -Entity $vmGuest | Where-Object -FilterScript {$PSItem.Name -eq $paramName}
+    
+    if ($timeSynchronizeContinueParam){
+        
+        Write-Output "O parâmetro - $paramName - existe. Verificando valor"
+        
+        $timeSynchronizeContinueValue = Get-AdvancedSetting -Entity $vmGuest | Where-Object -FilterScript {$PSItem.Name -eq $paramName} | Select-Object -ExpandProperty Value
+        
+        if ($timeSynchronizeContinueValue -eq '0'){
+            
+            Write-Output "The Value of $paramName is: $timeSynchronizeContinueValue . Value OK"
+            
+            }#END of Internal IF
+            else{
+            
+            Get-AdvancedSetting -Entity $vmGuest -Name $paramName | Set-AdvancedSetting -Value 0 -Confirm:$False -Verbose
+            
+            }#END of Internal ELSE
+
+
+        }#end of Main IF
+    else{
+        
+        Get-VM -Name $vmGuest | New-AdvancedSetting -Name $paramName -value 0 -Confirm:$false -Verbose
+
+}#END of Main Else 
+
+
+
+    $paramName = ""
+    $paramName = "time.synchronize.restore"
+
+    $timeSynchronizeRestoreParam = Get-AdvancedSetting -Entity $vmGuest | Where-Object -FilterScript {$PSItem.Name -eq $paramName}
+    
+    if ($timeSynchronizeRestoreParam){
+        
+        Write-Output "O parâmetro - $paramName - existe. Verificando valor"
+        
+        $timeSynchronizeRestoreValue = Get-AdvancedSetting -Entity $vmGuest | Where-Object -FilterScript {$PSItem.Name -eq $paramName} | Select-Object -ExpandProperty Value
+        
+        if ($timeSynchronizeRestoreValue -eq '0'){
+            
+            Write-Output "The Value of $paramName is: $timeSynchronizeRestoreValue . Value OK"
+            
+            }#END of Internal IF
+            else{
+            
+            Get-AdvancedSetting -Entity $vmGuest -Name $paramName | Set-AdvancedSetting -Value 0 -Confirm:$False -Verbose
+            
+            }#END of Internal ELSE
+
+
+        }#end of Main IF
+    else{
+        
+        Get-VM -Name $vmGuest | New-AdvancedSetting -Name $paramName -value 0 -Confirm:$false -Verbose
+
+}#END of Main Else 
+
+
+    $paramName = ""
+    $paramName = "time.synchronize.resume.disk"
+
+    $timeSynchronizeResumeDiskParam = Get-AdvancedSetting -Entity $vmGuest | Where-Object -FilterScript {$PSItem.Name -eq $paramName}
+    
+    if ($timeSynchronizeResumeDiskParam){
+        
+        Write-Output "O parâmetro - $paramName - existe. Verificando valor"
+        
+        $timeSynchronizeResumeDiskValue = Get-AdvancedSetting -Entity $vmGuest | Where-Object -FilterScript {$PSItem.Name -eq $paramName} | Select-Object -ExpandProperty Value
+        
+        if ($timeSynchronizeResumeDiskValue -eq '0'){
+            
+            Write-Output "The Value of $paramName is: $timeSynchronizeResumeDiskValue . Value OK"
+            
+            }#END of Internal IF
+            else{
+            
+            Get-AdvancedSetting -Entity $vmGuest -Name $paramName | Set-AdvancedSetting -Value 0 -Confirm:$False -Verbose
+            
+            }#END of Internal ELSE
+
+
+        }#end of Main IF
+    else{
+        
+        Get-VM -Name $vmGuest | New-AdvancedSetting -Name $paramName -value 0 -Confirm:$false -Verbose
+
+}#END of Main Else 
+
+
+    $paramName = ""
+    $paramName = "time.synchronize.shrink"
+
+    $timeSynchronizeShrinkParam = Get-AdvancedSetting -Entity $vmGuest | Where-Object -FilterScript {$PSItem.Name -eq $paramName}
+    
+    if ($timeSynchronizeShrinkParam){
+        
+        Write-Output "O parâmetro - $paramName - existe. Verificando valor"
+        
+        $timeSynchronizeShrinkValue = Get-AdvancedSetting -Entity $vmGuest | Where-Object -FilterScript {$PSItem.Name -eq $paramName} | Select-Object -ExpandProperty Value
+        
+        if ($timeSynchronizeShrinkValue -eq '0'){
+            
+            Write-Output "The Value of $paramName is: $timeSynchronizeShrinkValue . Value OK"
+            
+            }#END of Internal IF
+            else{
+            
+            Get-AdvancedSetting -Entity $vmGuest -Name $paramName | Set-AdvancedSetting -Value 0 -Confirm:$False -Verbose
+            
+            }#END of Internal ELSE
+
+
+        }#end of Main IF
+    else{
+        
+        Get-VM -Name $vmGuest | New-AdvancedSetting -Name $paramName -value 0 -Confirm:$false -Verbose
+
+}#END of Main Else 
+
+
+    $paramName = ""
+    $paramName = "time.synchronize.tools.startup"
+
+    $timeSynchronizeToolsStartupParam = Get-AdvancedSetting -Entity $vmGuest | Where-Object -FilterScript {$PSItem.Name -eq $paramName}
+    
+    if ($timeSynchronizeToolsStartupParam){
+        
+        Write-Output "O parâmetro - $paramName - existe. Verificando valor"
+        
+        $timeSynchronizeToolsStartupValue = Get-AdvancedSetting -Entity $vmGuest | Where-Object -FilterScript {$PSItem.Name -eq $paramName} | Select-Object -ExpandProperty Value
+        
+        if ($timeSynchronizeToolsStartupValue -eq '0'){
+            
+            Write-Output "The Value of $paramName is: $timeSynchronizeToolsStartupValue . Value OK"
+            
+            }#END of Internal IF
+            else{
+            
+            Get-AdvancedSetting -Entity $vmGuest -Name $paramName | Set-AdvancedSetting -Value 0 -Confirm:$False -Verbose
+            
+            }#END of Internal ELSE
+
+
+        }#end of Main IF
+    else{
+        
+        Get-VM -Name $vmGuest | New-AdvancedSetting -Name $paramName -value 0 -Confirm:$false -Verbose
+
+}#END of Main Else 
+
+
+    $paramName = ""
+    $paramName = "time.synchronize.tools.enable"
+
+    $timeSynchronizeToolsEnableParam = Get-AdvancedSetting -Entity $vmGuest | Where-Object -FilterScript {$PSItem.Name -eq $paramName}
+    
+    if ($timeSynchronizeToolsEnableParam){
+        
+        Write-Output "O parâmetro - $paramName - existe. Verificando valor"
+        
+        $timeSynchronizeToolsEnableValue = Get-AdvancedSetting -Entity $vmGuest | Where-Object -FilterScript {$PSItem.Name -eq $paramName} | Select-Object -ExpandProperty Value
+        
+        if ($timeSynchronizeToolsEnableValue -eq '0'){
+            
+            Write-Output "The Value of $paramName is: $timeSynchronizeToolsEnableValue . Value OK"
+            
+            }#END of Internal IF
+            else{
+            
+            Get-AdvancedSetting -Entity $vmGuest -Name $paramName | Set-AdvancedSetting -Value 0 -Confirm:$False -Verbose
+            
+            }#END of Internal ELSE
+
+
+        }#end of Main IF
+    else{
+        
+        Get-VM -Name $vmGuest | New-AdvancedSetting -Name $paramName -value 0 -Confirm:$false -Verbose
+
+}#END of Main Else 
+
+
+    $paramName = ""
+    $paramName = "time.synchronize.resume.host"
+
+    $timeSynchronizeResumeHostParam = Get-AdvancedSetting -Entity $vmGuest | Where-Object -FilterScript {$PSItem.Name -eq $paramName}
+    
+    if ($timeSynchronizeResumeHostParam){
+        
+        Write-Output "O parâmetro - $paramName - existe. Verificando valor"
+        
+        $timeSynchronizeResumeHostValue = Get-AdvancedSetting -Entity $vmGuest | Where-Object -FilterScript {$PSItem.Name -eq $paramName} | Select-Object -ExpandProperty Value
+        
+        if ($timeSynchronizeResumeHostValue -eq '0'){
+            
+            Write-Output "The Value of $paramName is: $timeSynchronizeResumeHostValue . Value OK"
+            
+            }#END of Internal IF
+            else{
+            
+            Get-AdvancedSetting -Entity $vmGuest -Name $paramName | Set-AdvancedSetting -Value 0 -Confirm:$False -Verbose
+            
+            }#END of Internal ELSE
+
+
+        }#end of Main IF
+    else{
+        
+        Get-VM -Name $vmGuest | New-AdvancedSetting -Name $paramName -value 0 -Confirm:$false -Verbose
+
+}#END of Main Else 
+
+######## TURN ON VM AGAIN ######################
+Start-Sleep -Seconds 5
+
+Import-Module -Name Vmware.VimAutomation.Core -Force
+
+Vmware.VimAutomation.Core\Start-VM -VM $tmpVM -Confirm:$false -RunAsync -Verbose
+
+}#END OF MAIN DISABLE TIME SYNC FULL
+else{
+
+    Write-Host "You choose not to change time sync in VM: $vmGuest" -BackgroundColor DarkGreen -ForegroundColor White
+
+}#END OF ELSE DISABLE TIME SYNC FULL
+
+
+##########################################################################
 
 #Check for Floppy Devices attached to VMs
     $floppyState = Get-VM -Name $vmGuest | Get-FloppyDrive | Where-Object -FilterScript {$_.ConnectionState -like "Connected*"}
@@ -807,11 +1104,13 @@ do {
         Get-Vm -Name $vmGuest | Get-FloppyDrive | Set-FloppyDrive -Connected:$false -StartConnected:$False -Confirm:$true
 
 
-
+#REMOVE FLOPPY DISK
 do {
 
     Write-Output "Would you like to Remove Floopy Drive of this VM? I will need to shutdown it First (Default is No)" 
+        
         $MainChoiceYN = Read-Host " ( y / n ) "
+        
             Switch ($MainChoiceYN)
               {
                 Y {
@@ -824,7 +1123,9 @@ do {
                         do {
 
                             Write-Output "Would you like to Shutdown the VM $vmGuest (Default is No)" 
+                            
                             $ChoiceYN = Read-Host " ( y / n ) "
+                            
                             Switch ($ChoiceYN)
                                 {
                                     Y {
@@ -875,17 +1176,14 @@ do {
                     Write-Output "You choose don't remove floopy of the VM $vmGuest"         
        
                  }#end of Default
-}#end of Switch
-
+    }#end of Switch
 
 }while ($MainChoiceYN -notmatch ('^(?:Y\b|N\b)'))
 
-
 }#END MAIN IF
 
-
 #FOR LINUX MACHINE WITH SHELL ONLY
-    do {
+do {
 
         Write-Output "`n"
 
@@ -894,7 +1192,9 @@ do {
         Write-Output "`n"
 
         Write-Host "IF YOU ARE NOT SURE, ANSWER NO BECAUSE VIRTUAL MACHINE WILL CRASH !!!!!" -ForegroundColor Red -BackgroundColor White 
+        
         $ChoiceSvgaLinux = Read-Host " ( y / n ) "
+            
             Switch ($ChoiceSvgaLinux)
               {
                 Y {
@@ -905,50 +1205,54 @@ do {
     
                     $svgaOnlyParam = Get-AdvancedSetting -Entity $vmGuest | Where-Object -FilterScript {$PSItem.Name -eq $paramName}
     
-                if ($svgaOnlyParam){
+                    if ($svgaOnlyParam){
         
-                    Write-Output "O parâmetro - $paramName - existe. Verificando valor"
+                        Write-Output "O parâmetro - $paramName - existe. Verificando valor"
         
-                    $svgaOnlyValue = Get-AdvancedSetting -Entity $vmGuest | Where-Object -FilterScript {$PSItem.Name -eq $paramName} | Select-Object -ExpandProperty Value
+                        $svgaOnlyValue = Get-AdvancedSetting -Entity $vmGuest | Where-Object -FilterScript {$PSItem.Name -eq $paramName} | Select-Object -ExpandProperty Value
         
-                if ($svgaOnlyValue -eq 'True'){
+                    if ($svgaOnlyValue -eq 'True'){
             
-                Write-Output "The Value of $paramName is: $svgaOnlyValue . Value OK"
+                        Write-Output "The Value of $paramName is: $svgaOnlyValue . Value OK"
             
-                }#END of Internal IF
-                else{
+                    }#END of Internal IF
+                    else{
             
-                Get-AdvancedSetting -Entity $vmGuest -Name $paramName | Set-AdvancedSetting -Value "False" -Confirm:$False -Verbose
+                        Get-AdvancedSetting -Entity $vmGuest -Name $paramName | Set-AdvancedSetting -Value "False" -Confirm:$False -Verbose
             
-                }#END of Internal ELSE
+                    }#END of Internal ELSE
                 
-                }#end of Main IF
-                else{
+                    }#end of Main IF
+                    else{
         
-                    Get-VM -Name $vmGuest | New-AdvancedSetting -Name $paramName -value "False" -Confirm:$false -Verbose
+                        Get-VM -Name $vmGuest | New-AdvancedSetting -Name $paramName -value "False" -Confirm:$false -Verbose
 
-                }#END of Main Else 
+                    }#END of Main Else 
 
-
-
+                    
                     Start-Sleep -Milliseconds 300 -Verbose   
        
                     }#end of Y
                 N {
+                    
                     Write-Output "Nothing to do with VM $vmGuest"
        
                     }#end of NO
-                Default { 
+                Default
+                { 
+                
                     Write-Output "Nothing to do with VM $vmGuest"        
        
                  }#end of Default
     }#end of Switch
 }while ($ChoiceSvgaLinux -notmatch ('^(?:Y\b|N\b)'))
 
-    ###########################################################################################################################
-    #Export Advanced Config to File
-    Get-AdvancedSetting -Entity $vmGuest | Format-Table -AutoSize | Out-File -Width 2048 -FilePath $outputfileAfter -Append -Verbose
-            
+###########################################################################################################################
+#Export Advanced Config to File
+###########################################################################################################################
+Get-AdvancedSetting -Entity $vmGuest | Format-Table -AutoSize | Out-File -Width 2048 -FilePath $outputfileAfter -Append -Verbose
+###########################################################################################################################
+          
 
 }#end ForEach
  
@@ -961,10 +1265,12 @@ do {
     return $isNum
 } #end function is Numeric
 
+#MAIN SCRIPT
+
 
 #CREATE VCENTER LIST
 $vcServers = @();
-$vcServers = ("vCenter1","vCenter2")
+$vcServers = ("vCenter1","vCenter2")#CHANGE WITH YOUR(S) VCENTER(S)
 
 $workingLocationNum = ""
 $tmpWorkingLocationNum = ""
@@ -1003,7 +1309,7 @@ $port = '443'
 Connect-VIServer -Server $WorkingServer -Port $port -WarningAction Continue -ErrorAction Continue
 
 
-$dataAtual = (Get-date -Format dd-MM-yyyy_HHmmss)
+$dataAtual = (Get-date -Format dd-MM-yyyy_HHmm)
 
 $Response = 'Y'
 
@@ -1011,15 +1317,13 @@ $vmList = @()
 
 $bunchOfVMs = @()
 
-#DISABLE OR ENABLE COPY PASTE
-$disableCopyPaste = $true
 
 #MENU ACTION HARDENIG SEC
 Do {
     Write-Output "
 ---------- MENU HARDENING SEC VM ----------
 
-You are connected to Vcenter: $workingServer
+You are connected to VCenter: $workingServer
 
 1 = Get Advanced Settings of Single VM
 2 = Get Advanced Settings of One or More VMs
@@ -1035,6 +1339,79 @@ You are connected to Vcenter: $workingServer
 
 $choiceHS = Read-host -prompt "Select an Option & Press Enter"
 } until ($choiceHS -eq "1" -or $choiceHS -eq "2" -or $choiceHS -eq "3" -or $choiceHS -eq "4" -or $choiceHS -eq "5" -or $choiceHS -eq "6" -or $choiceHS -eq "7" -or $choiceHS -eq "8" -or $choiceHS -eq "9")
+
+
+#CONFIGURE BLOCKS TO ENABLE OR NOT
+if (($choiceHS -eq 5) -or ($choiceHS -eq 6) -or ($choiceHS -eq 7) -or ($choiceHS -eq 8)){
+
+    #CONFIGURE MAIN PARAMETERS OF VM-HARDENING
+###################################################################################################################################################
+
+#DISABLE OR ENABLE COPY PASTE
+do
+{
+    $StringDisableCopyPasteValue = Read-Host "Digite (FALSE) para ATIVAR o Copy/Paste e (TRUE) para DESATIVAR"
+    
+    if ($StringDisableCopyPasteValue -eq 'False' -or $StringDisableCopyPasteValue -eq 'True'){
+    
+        $boolDisableCopyPasteValue = [System.Convert]::ToBoolean($StringDisableCopyPasteValue)
+    
+    }else{
+    
+        Write-Host "Você digitou um valor inválido, somente é aceito (FALSE) ou (TRUE)" -ForegroundColor White -BackgroundColor DarkRed    
+    
+    } 
+         
+}
+while ($StringDisableCopyPasteValue -notmatch ('^(?:false\b|true\b)'))
+
+#DISABLE OR ENABLE BACKUP PARAMETERS
+do
+{
+    $StringConfigBackupParam = Read-Host "Digite (FALSE) para DESATIVAR parâmetros de Backup VMDK e (TRUE) para ATIVAR"
+    
+    if ($StringConfigBackupParam -eq 'False' -or $StringConfigBackupParam -eq 'True'){
+    
+        $boolConfigBackupParam = [System.Convert]::ToBoolean($StringConfigBackupParam)
+    
+    }else{
+    
+        Write-Host "Você digitou um valor inválido, somente é aceito (FALSE) ou (TRUE)" -ForegroundColor White -BackgroundColor DarkRed    
+    
+    } 
+         
+}
+while ($StringConfigBackupParam -notmatch ('^(?:false\b|true\b)'))
+
+#COMPLETELY DISABLE OR ENABLE TIME SYNC
+do
+{
+    $StringDisableTimeSyncFull = Read-Host "Digite (FALSE) para NÃO ALTERAR e (TRUE) para DESATIVAR COMPLETAMENTE o timesync da(s) VM(s) com o ESXi"
+    
+    if ($StringDisableTimeSyncFull -eq 'False' -or $StringDisableTimeSyncFull -eq 'True'){
+    
+        $boolDisableTimeSyncFull = [System.Convert]::ToBoolean($StringDisableTimeSyncFull)
+    
+    }else{
+    
+        Write-Host "Você digitou um valor inválido, somente é aceito (FALSE) ou (TRUE)" -ForegroundColor White -BackgroundColor DarkRed    
+    
+    } 
+         
+}
+while ($StringDisableTimeSyncFull -notmatch ('^(?:false\b|true\b)'))
+
+
+###################################################################################################################################################
+
+
+
+}#END OF IF CONFIGURE BLOCKS TO ENABLE OR NOT 
+else{
+
+    Write-Host "You Choose Just Get Info from VMs. So I have nothing to configure" -ForegroundColor DarkGreen -BackgroundColor White
+
+}#END OF ELSE CONFIGURE BLOCKS TO ENABLE OR NOT
 
 
 #SET FILE NAME BASED ON CHOICE
@@ -1126,15 +1503,9 @@ switch ($choiceHS)
          Write-Output "Advanced Settings of VM: $vmName" | Out-File -Width 2048 -FilePath $outputfileBefore -Append -Verbose
             
          Get-AdvancedSetting -Entity $vmName | Format-Table -AutoSize | Out-File -Width 2048 -FilePath $outputfileBefore -Append -Verbose
-                 
-         
          
          }#end of ForEach
 
-   
-    
-    
-    
     }#end of 2
     "3" {
         
@@ -1198,14 +1569,15 @@ switch ($choiceHS)
     
         if (!($inputPathExists)){
 
-        Write-Host "Folder Named: VMsInputList does not exists. I will create it" -ForegroundColor Yellow -BackgroundColor Black
+            Write-Host "Folder Named: VMsInputList does not exists. I will create it" -ForegroundColor Yellow -BackgroundColor Black
 
-        New-Item -Path $Script_Parent -ItemType Directory -Name "VMsInputList" -Confirm:$true -Verbose -Force
+            New-Item -Path $Script_Parent -ItemType Directory -Name "VMsInputList" -Confirm:$true -Verbose -Force
 
         }else{
 
-        Write-Host "Folder Named: VMsInputList exists" -ForegroundColor White -BackgroundColor Blue
-        Write-Output "`n"
+            Write-Host "Folder Named: VMsInputList exists" -ForegroundColor White -BackgroundColor Blue
+            
+            Write-Output "`n"
  
         }#END OF ELSE
 
@@ -1245,7 +1617,7 @@ switch ($choiceHS)
     
         Write-Output "Setting Advanced Setings om Vm: $vmName"
         
-        Set-VMHardeningSec -vmList $vmName
+        Set-VMHardeningSec -vmList $vmName -disableCopyPaste $boolDisableCopyPasteValue -ConfigBackupParam $boolConfigBackupParam -DisableTimeSyncFull $boolDisableTimeSyncFull
 
     
     }#end of 5
@@ -1274,21 +1646,18 @@ switch ($choiceHS)
       }#end of external DO
     Until ($Response -eq 'n')#end of Until
             
-
-            Set-VMHardeningSec -vmList $vmList -ErrorAction Continue
-            
-     
-    
+                       
+            Set-VMHardeningSec -vmList $vmList -disableCopyPaste $boolDisableCopyPasteValue -ConfigBackupParam $boolConfigBackupParam -DisableTimeSyncFull $boolDisableTimeSyncFull -ErrorAction Continue
     
     }#end of 6
     "7" {
     
-    Write-Host "CAUTION. WHEN RUNNING THIS OPTION YOU WILL APPLY CONFIGURATION TO ALL VMs in SELECTED CLUSTER" -BackgroundColor Red -ForegroundColor White
+    Write-Host "CUIDADO. AO RODAR ESSA OPÇÃO VOCÊ APLICARÁ A CONFIGURAÇÃO EM TODAS AS VMS do CLUSTER" -BackgroundColor Red -ForegroundColor White
 
     Pause-PSScript
 
     #CREATE CLUSTER LIST
-        $VCClusterList = (get-cluster | Select-Object -ExpandProperty Name| Sort-Object)
+        $VCClusterList = (get-cluster  | Select-Object -ExpandProperty Name| Sort-Object)
 
         $tmpWorkingClusterNum = ""
         $WorkingCluster = ""
@@ -1330,15 +1699,12 @@ switch ($choiceHS)
 
         Write-Output "Advanced Settings of VM: $vmName" | Out-File -Width 2048 -FilePath $outputfileAfter -Append -Verbose
             
-        Set-VMHardeningSec -vmList $vmName
+        Set-VMHardeningSec -vmList $vmList -disableCopyPaste $boolDisableCopyPasteValue -ConfigBackupParam $boolConfigBackupParam -DisableTimeSyncFull $boolDisableTimeSyncFull -ErrorAction Continue
 
         Write-Output "=======================================================================================================================" | Out-File -Width 2048 -FilePath $outputfileAfter -Append -Verbose
 
         }#end ForEach Cluster List Set
 
-
-
-    
     
     }#end of 7
     "8" {
@@ -1346,14 +1712,15 @@ switch ($choiceHS)
 
     if (!($inputPathExists)){
 
-        Write-Host "Folder Named: VMsInputList does not exists. I will create it" -ForegroundColor Yellow -BackgroundColor Black
+            Write-Host "Folder Named: VMsInputList does not exists. I will create it" -ForegroundColor Yellow -BackgroundColor Black
 
-        New-Item -Path $Script_Parent -ItemType Directory -Name "VMsInputList" -Confirm:$true -Verbose -Force
+            New-Item -Path $Script_Parent -ItemType Directory -Name "VMsInputList" -Confirm:$true -Verbose -Force
 
         }else{
 
-        Write-Host "Folder Named: VMsInputList exists" -ForegroundColor White -BackgroundColor Blue
-        Write-Output "`n"
+            Write-Host "Folder Named: VMsInputList exists" -ForegroundColor White -BackgroundColor Blue
+        
+            Write-Output "`n"
  
         }#END OF ELSE
 
@@ -1361,15 +1728,16 @@ switch ($choiceHS)
         #CREATE FILE WITH VM INPUT LIST IF NOT EXIST
         if (Test-Path -Path "$Script_Parent\VMsInputList\VmsInputList.txt"){
             
-            Write-Host "File VmsInputList.txt already exists" -ForegroundColor White -BackgroundColor Red          
+            Write-Host "File VmsInputList.txt already exists" -ForegroundColor White -BackgroundColor Red  
+                    
         }#end of IF
         else{
         
-        New-Item -Path "$Script_Parent\VMsInputList" -ItemType File -Name VmsInputList.txt -Confirm:$true -Verbose
+            New-Item -Path "$Script_Parent\VMsInputList" -ItemType File -Name VmsInputList.txt -Confirm:$true -Verbose
         
-        Start-Process -FilePath "notepad" -Wait -WindowStyle Maximized -ArgumentList "$Script_Parent\VMsInputList\VmsInputList.txt"
+            Start-Process -FilePath "notepad" -Wait -WindowStyle Maximized -ArgumentList "$Script_Parent\VMsInputList\VmsInputList.txt"
         
-        Start-Sleep -Seconds 5
+            Start-Sleep -Seconds 5
         
         
         }#end of Else
@@ -1381,7 +1749,7 @@ switch ($choiceHS)
         
         Write-Output "Advanced Settings of VM: $vmName" | Out-File -Width 2048 -FilePath $outputfileAfter -Append -Verbose
         
-        Set-VMHardeningSec -vmList $vmName 
+        Set-VMHardeningSec -vmList $vmList -disableCopyPaste $boolDisableCopyPasteValue -ConfigBackupParam $boolConfigBackupParam -DisableTimeSyncFull $boolDisableTimeSyncFull -ErrorAction Continue
 
         Write-Output "=======================================================================================================================" | Out-File -Width 2048 -FilePath $outputfileAfter -Append -Verbose
         
@@ -1392,11 +1760,11 @@ switch ($choiceHS)
     }#end of 8
     "9" {
     
-    Write-Output "You choose finish the Script"
+        Write-Output "You choose finish the Script"
     
-    Start-Sleep -Seconds 2
+        Start-Sleep -Seconds 1
     
-    Exit
+        Exit
     
     
     }#end of 9
