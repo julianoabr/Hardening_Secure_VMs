@@ -5,7 +5,7 @@
 .Synopsis
    Hardening VM
 .DESCRIPTION
-   Hardening and Sec Ambev VM Vcenter 6.5
+   Hardening and Sec VM Vcenter 6.5
 .EXAMPLE
    Insert after create main function
 .URL
