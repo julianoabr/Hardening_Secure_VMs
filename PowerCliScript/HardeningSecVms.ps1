@@ -16,7 +16,7 @@
 .EXAMPLE
    Inserir posteriormente
 .CREATEDBY
-    Juliano Alves de Brito Ribeiro (julianoalvesbr@live.com)
+    Juliano Alves de Brito Ribeiro (Find me at julianoalvesbr@live.com or https://github.com/julianoabr)
 .VERSION INFO
     0.5.2
 .TO THINK
