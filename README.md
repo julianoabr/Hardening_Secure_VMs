@@ -1,4 +1,4 @@
-# HardeningSecVMs
+# Hardening and Secure VMs
 This Script is Based on Security and Hardening Guides of VMware
 
 **The Configuration Parameters are based on following documents from Vmware:**
